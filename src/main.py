@@ -1,6 +1,13 @@
 from pathlib import Path
 from node import Node
 from graph import Graph
+from dijkstra import (
+    dijkstra,
+    get_shortest_path,
+    all_pairs_shortest_paths,
+    print_shortest_paths,
+    print_distance_matrix
+)
 import csv
 
 # Make dataset paths relative to repository root (two levels up from this file's folder)
@@ -62,6 +69,7 @@ def load_edges(path):
 
             g.add_edge(a, b, w, bidirectional=True)
 
+
 def print_graph(graph: Graph):
     # print nodes
     try:
@@ -105,9 +113,51 @@ def print_graph(graph: Graph):
             print("\nNenhuma representação de arestas encontrada no objeto Graph.")
 
 def main():
+    # Carrega os dados do grafo
+    print("Carregando grafo do dataset...")
     load_nodes(PATH_NODES)
     load_edges(PATH_EDGES)
     print_graph(g)
+    
+    # Calcula caminhos mais curtos entre todos os pares de nós
+    print("\nCalculando caminhos mais curtos com Dijkstra...")
+    all_paths = all_pairs_shortest_paths(g)
+    
+    # Imprime os resultados
+    print_shortest_paths(g, all_paths)
+    print_distance_matrix(g, all_paths)
+    
+    # Exemplo: caminho específico do hospital (nó 0) para um paciente
+    print("\n" + "="*80)
+    print("EXEMPLO: Caminho do Hospital para cada Paciente")
+    print("="*80)
+    
+    hospital_id = None
+    # Encontra o hospital
+    for node_id, node in g.nodes.items():
+        if node.is_hospital:
+            hospital_id = node_id
+            break
+    
+    if hospital_id is not None:
+        # Lista pacientes ordenados por prioridade
+        pacientes = [(nid, n) for nid, n in g.nodes.items() if n.tipo == 'paciente']
+        pacientes_ordenados = sorted(pacientes, key=lambda x: x[1].prioridade or 0, reverse=True)
+        
+        print(f"\nHospital: {g.nodes[hospital_id].nome} (ID: {hospital_id})\n")
+        
+        for paciente_id, paciente in pacientes_ordenados:
+            distance, path = all_paths[(hospital_id, paciente_id)]
+            
+            # Formata o caminho
+            path_str = " → ".join([f"{nid}({g.nodes[nid].nome})" for nid in path])
+            
+            print(f"Paciente: {paciente.nome} (ID: {paciente_id}, Prioridade: {paciente.prioridade})")
+            print(f"  Tempo de transporte: {distance:.2f}")
+            print(f"  Caminho: {path_str}")
+            print()
+    
+    print("="*80)
 
 if __name__ == "__main__":
     main()
