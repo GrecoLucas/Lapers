@@ -14,10 +14,11 @@ from dp import (
     greedy_maximize_priority,
 )
 import csv
+import time
 from UI.interface import draw_graph
 
-DIFFICULTY = "mytests"
-LEVEL = "1"
+DIFFICULTY = "hard"
+LEVEL = "9"
 
 # Make dataset paths relative to repository root (two levels up from this file's folder)
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -140,7 +141,11 @@ def main():
     
     # Calcula caminhos mais curtos entre todos os pares de nós
     print("\nCalculando caminhos mais curtos com Dijkstra...")
+    print("Complexidade: O(V² × (V + E) log V) onde V = nós, E = arestas")
+    start_dijkstra = time.time()
     all_paths = all_pairs_shortest_paths(g)
+    elapsed_dijkstra = time.time() - start_dijkstra
+    print(f"⏱️ Tempo Dijkstra: {elapsed_dijkstra:.4f}s")
 
 
     # Lê budget de tempo
@@ -165,6 +170,11 @@ def main():
     use_dp = num_pacientes <= 20
     metodo = 'DP (ótimo)' if use_dp else 'Heurística (gananciosa)'
     print(f"Método de otimização: {metodo}")
+    
+    if use_dp:
+        print("Complexidade DP: O(H × 2^P × P × V) onde H = hospitais, P = pacientes, V = nós")
+    else:
+        print("Complexidade Heurística: O(H × P² × V) onde H = hospitais, P = pacientes, V = nós")
 
     best = {
         'hospital': None,
@@ -174,6 +184,7 @@ def main():
         'optimal': use_dp,
     }
 
+    start_optimization = time.time()
     for hid in hospital_ids:
         if use_dp:
             route, prio, t, _ = maximize_priority_dp(g, all_paths, hid, time_budget, hospital_ids)
@@ -181,6 +192,8 @@ def main():
             route, prio, t, _ = greedy_maximize_priority(g, all_paths, hid, time_budget, hospital_ids)
         if prio > best['priority'] or (prio == best['priority'] and t < best['time']):
             best.update({'hospital': hid, 'route': route, 'priority': prio, 'time': t, 'optimal': use_dp})
+    elapsed_optimization = time.time() - start_optimization
+    print(f"⏱️ Tempo Otimização: {elapsed_optimization:.4f}s")
 
     if not best['route'] or best['hospital'] is None or best['priority'] == 0:
         print("Nenhuma rota viável dentro do budget encontrada a partir de nenhum hospital.")
@@ -224,20 +237,21 @@ def main():
         tipo_curr, nid_curr = route_nodes[i]
         tipo_next, nid_next = route_nodes[i + 1]
         
-        # Distância entre localizações consecutivas
-        d = all_paths.get((nid_curr, nid_next), (float('inf'), []))[0]
+        # Distância e caminho (nós intermediários) entre localizações consecutivas
+        d, path = all_paths.get((nid_curr, nid_next), (float('inf'), []))
         if d != float('inf'):
             total_transp += d
-        
+
         # Se próximo é paciente, adiciona tempo de atendimento
         if tipo_next == 'P':
             node = g.nodes[nid_next]
             g.nodes[nid_next].resgatado = True
             tempo = getattr(node, 'tempo_cuidados_minimos', 0) or 0
             total_atend += float(tempo)
-            
+
             prev_label = f"H{nid_curr}" if tipo_curr == 'H' else f"P{nid_curr}"
-            print(f"  {prev_label} → P{nid_next}: {d:.2f} (transporte) + {tempo:.2f} (atendimento)")
+            path_str = " → ".join(str(x) for x in path) if path else "(sem caminho)"
+            print(f"  {prev_label} → P{nid_next}: {d:.2f} (transporte) + {tempo:.2f} (atendimento)    caminho: {path_str}")
 
     print("-"*80)
     print(f"Prioridade total atendida: {best['priority']}")

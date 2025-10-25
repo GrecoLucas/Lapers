@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import csv
+import time
 from typing import Dict, List, Tuple, Optional
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -160,13 +161,21 @@ def get_dataset_stats(g: Graph) -> Dict:
 # FUNÇÕES DE OTIMIZAÇÃO
 # ============================================================================
 
-def calculate_optimal_route(g: Graph, hospital_id: int, time_budget: float):
+def calculate_optimal_route(g: Graph, hospital_id: int, time_budget: float, force_algorithm: str = 'auto'):
     """
     Calcula a rota ótima usando DP ou heurística conforme necessário.
     Retorna dict com resultados completos.
+    
+    Args:
+        g: Grafo com nós e arestas
+        hospital_id: ID do hospital inicial
+        time_budget: Tempo total disponível
+        force_algorithm: 'auto', 'dp', ou 'greedy'
     """
     # Calcula caminhos mais curtos
+    start_dijkstra = time.time()
     all_paths = all_pairs_shortest_paths(g)
+    time_dijkstra = time.time() - start_dijkstra
     
     # Zera estado de resgate
     for n in g.nodes.values():
@@ -184,10 +193,49 @@ def calculate_optimal_route(g: Graph, hospital_id: int, time_budget: float):
     all_hospitals = [nid for nid, n in g.nodes.items() if n.is_hospital]
     
     # Escolhe método
-    use_dp = num_pacientes <= 20
+    if force_algorithm == 'auto':
+        use_dp = num_pacientes <= 20
+    elif force_algorithm == 'dp':
+        use_dp = True
+    else:  # greedy
+        use_dp = False
+    
     metodo = 'DP Ótimo' if use_dp else 'Heurística Gananciosa'
     
+    # Complexidade do algoritmo com explicações
+    num_nodes = len(g.nodes)
+    num_hospitals = len(all_hospitals)
+    num_edges = sum(len(adj) for adj in g.adjacency.values()) // 2
+    
+    if use_dp:
+        complexity = f"O(H × 2^P × P × V)"
+        complexity_values = f"O({num_hospitals} × 2^{num_pacientes} × {num_pacientes} × {num_nodes})"
+        complexity_explanation = (
+            "**H** = Número de hospitais (pontos de partida/retorno)\n"
+            "**P** = Número de pacientes candidatos\n"
+            "**V** = Número total de vértices (nós) no grafo\n"
+            "**2^P** = Número de subconjuntos possíveis de pacientes (programação dinâmica com bitmask)"
+        )
+    else:
+        complexity = f"O(H × P² × V)"
+        complexity_values = f"O({num_hospitals} × {num_pacientes}² × {num_nodes})"
+        complexity_explanation = (
+            "**H** = Número de hospitais (pontos de partida/retorno)\n"
+            "**P** = Número de pacientes candidatos\n"
+            "**V** = Número total de vértices (nós) no grafo\n"
+            "**P²** = Iterações para selecionar próximo paciente de forma gulosa"
+        )
+    
+    dijkstra_complexity = f"O(V² × (V + E) log V)"
+    dijkstra_values = f"O({num_nodes}² × ({num_nodes} + {num_edges}) log {num_nodes})"
+    dijkstra_explanation = (
+        "**V** = Número de vértices (nós)\n"
+        "**E** = Número de arestas\n"
+        "Executa Dijkstra V vezes (uma para cada nó)"
+    )
+    
     # Executa otimização
+    start_optimization = time.time()
     if use_dp:
         route, priority, time_used, optimal = maximize_priority_dp(
             g, all_paths, hospital_id, time_budget, all_hospitals
@@ -196,6 +244,7 @@ def calculate_optimal_route(g: Graph, hospital_id: int, time_budget: float):
         route, priority, time_used, optimal = greedy_maximize_priority(
             g, all_paths, hospital_id, time_budget, all_hospitals
         )
+    time_optimization = time.time() - start_optimization
     
     # Monta percurso detalhado (hospital -> paciente -> hospital -> ...)
     # A rota agora é uma lista de tuplas (tipo, nid)
@@ -222,6 +271,15 @@ def calculate_optimal_route(g: Graph, hospital_id: int, time_budget: float):
         'is_optimal': optimal,
         'num_patients': len(chosen_patients),
         'all_paths': all_paths,
+        'time_dijkstra': time_dijkstra,
+        'time_optimization': time_optimization,
+        'time_total': time_dijkstra + time_optimization,
+        'complexity': complexity,
+        'complexity_values': complexity_values,
+        'complexity_explanation': complexity_explanation,
+        'dijkstra_complexity': dijkstra_complexity,
+        'dijkstra_values': dijkstra_values,
+        'dijkstra_explanation': dijkstra_explanation,
     }
 
 # ============================================================================
@@ -257,9 +315,28 @@ def create_graph_visualization(g: Graph, result: Dict, hospital_id: int):
     # Determina conjunto de arestas da rota
     route_edges = set()
     full_path = result.get('full_path', [])
+    all_paths = result.get('all_paths', {})
+    # highlight_nodes conterá todos os nós que aparecem nos caminhos usados
+    highlight_nodes = set()
     for i in range(len(full_path) - 1):
-        u, v = full_path[i], full_path[i + 1]
-        route_edges.add((min(u, v), max(u, v)))
+        u0, v0 = full_path[i], full_path[i + 1]
+        # procura o caminho mais curto entre u0 e v0 (pode conter nós intermediários)
+        d_path = all_paths.get((u0, v0))
+        if d_path:
+            _d, path = d_path
+        else:
+            path = []
+
+        if path and len(path) >= 2:
+            # adiciona cada aresta do caminho à lista de arestas da rota
+            for j in range(len(path) - 1):
+                a, b = path[j], path[j + 1]
+                route_edges.add((min(a, b), max(a, b)))
+            highlight_nodes.update(path)
+        else:
+            # fallback: adiciona a aresta direta entre u0 e v0
+            route_edges.add((min(u0, v0), max(u0, v0)))
+            highlight_nodes.update([u0, v0])
     
     # Desenha arestas normais
     normal_edges = [(u, v) for u, v, _ in edges_info if (min(u, v), max(u, v)) not in route_edges]
@@ -298,8 +375,14 @@ def create_graph_visualization(g: Graph, result: Dict, hospital_id: int):
                 color = 'orange'
             else:
                 color = 'red'
+
+            # se o nó estiver em highlight_nodes (nó do caminho intermediário), destaque-o
+            if nid in highlight_nodes and not node.is_hospital:
+                # sobrescreve a cor para um tom chamativo
+                color = 'deepskyblue'
+
             node_colors.append(color)
-            
+
             # Tamanho proporcional à prioridade
             size = 300 + (prio * 15)
             node_sizes.append(size)
@@ -372,6 +455,8 @@ def create_route_table(g: Graph, result: Dict, hospital_id: int):
             # Busca tempo de transporte
             dist_info = result['all_paths'].get((prev_nid, nid), (0, []))
             tempo_transporte = dist_info[0]
+            path_between = dist_info[1] if len(dist_info) > 1 else []
+            path_str = " → ".join(str(x) for x in path_between) if path_between else '-'
             tempo_acum += tempo_transporte
         
         # Adiciona tempo de atendimento se for paciente
@@ -388,6 +473,7 @@ def create_route_table(g: Graph, result: Dict, hospital_id: int):
             'Prioridade': node.prioridade if not node.is_hospital else '-',
             'Tempo Atend.': f"{tempo_atend:.1f}" if tempo_atend > 0 else '-',
             'Tempo Acum.': f"{tempo_acum:.2f}",
+            'Caminho': path_str if idx > 0 else '-',
         })
     
     return pd.DataFrame(rows)
@@ -465,6 +551,36 @@ def main():
         hospital_id = default_hospital_id
         time_budget = default_time_budget
     
+    # Seleção de algoritmo
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🧮 Seleção de Algoritmo")
+    
+    algorithm_choice = st.sidebar.radio(
+        "Escolha o algoritmo de otimização:",
+        options=['Automático', 'DP (Programação Dinâmica)', 'Heurística Gulosa'],
+        index=0,
+        help=(
+            "**Automático:** Usa DP para ≤20 pacientes, Heurística para >20\n\n"
+            "**DP:** Solução ótima, mas exponencial (pode ser lento)\n\n"
+            "**Heurística:** Solução aproximada, mais rápida para muitos pacientes"
+        )
+    )
+    
+    # Mapeia escolha para parâmetro
+    if algorithm_choice == 'Automático':
+        force_algorithm = 'auto'
+    elif algorithm_choice == 'DP (Programação Dinâmica)':
+        force_algorithm = 'dp'
+    else:
+        force_algorithm = 'greedy'
+    
+    # Aviso se DP for escolhido com muitos pacientes
+    if force_algorithm == 'dp' and stats['pacientes'] > 20:
+        st.sidebar.warning(
+            f"⚠️ Atenção: DP com {stats['pacientes']} pacientes pode ser muito lento! "
+            f"Complexidade: O(2^{stats['pacientes']}) subconjuntos."
+        )
+    
     # ========================================================================
     # MAIN AREA - Botão de Cálculo e Resultados
     # ========================================================================
@@ -488,7 +604,7 @@ def main():
     if calculate_button:
         with st.spinner("🔄 Calculando rota ótima..."):
             try:
-                result = calculate_optimal_route(g, hospital_id, time_budget)
+                result = calculate_optimal_route(g, hospital_id, time_budget, force_algorithm)
                 st.session_state.result = result
             except Exception as e:
                 st.error(f"❌ Erro ao calcular rota: {e}")
@@ -532,6 +648,36 @@ def main():
     else:
         st.error("❌ Nenhuma rota viável encontrada dentro do budget de tempo.")
         return
+    
+    # Informação de complexidade e tempo
+    with st.expander("📊 Análise de Complexidade e Desempenho", expanded=True):
+        st.markdown("### 🔍 Complexidade Computacional")
+        
+        # Dijkstra
+        st.markdown("**1️⃣ Dijkstra (Caminhos Mais Curtos):**")
+        st.code(f"{result['dijkstra_complexity']} = {result['dijkstra_values']}", language="")
+        st.markdown(result['dijkstra_explanation'])
+        st.caption(f"⏱️ Tempo de execução: **{result['time_dijkstra']:.4f}s**")
+        
+        st.markdown("---")
+        
+        # Otimização
+        st.markdown(f"**2️⃣ {result['method']}:**")
+        st.code(f"{result['complexity']} = {result['complexity_values']}", language="")
+        st.markdown(result['complexity_explanation'])
+        st.caption(f"⏱️ Tempo de execução: **{result['time_optimization']:.4f}s**")
+        
+        st.markdown("---")
+        
+        # Total
+        st.markdown("### ⏱️ Tempo Total de Execução")
+        col_t1, col_t2, col_t3 = st.columns(3)
+        with col_t1:
+            st.metric("Dijkstra", f"{result['time_dijkstra']:.4f}s")
+        with col_t2:
+            st.metric("Otimização", f"{result['time_optimization']:.4f}s")
+        with col_t3:
+            st.metric("Total", f"{result['time_total']:.4f}s", delta=None)
     
     # Métricas em colunas
     col1, col2, col3, col4 = st.columns(4)
