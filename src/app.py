@@ -180,6 +180,9 @@ def calculate_optimal_route(g: Graph, hospital_id: int, time_budget: float):
     ]
     num_pacientes = len(pacientes)
     
+    # Identifica todos os hospitais
+    all_hospitals = [nid for nid, n in g.nodes.items() if n.is_hospital]
+    
     # Escolhe método
     use_dp = num_pacientes <= 20
     metodo = 'DP Ótimo' if use_dp else 'Heurística Gananciosa'
@@ -187,26 +190,27 @@ def calculate_optimal_route(g: Graph, hospital_id: int, time_budget: float):
     # Executa otimização
     if use_dp:
         route, priority, time_used, optimal = maximize_priority_dp(
-            g, all_paths, hospital_id, time_budget
+            g, all_paths, hospital_id, time_budget, all_hospitals
         )
     else:
         route, priority, time_used, optimal = greedy_maximize_priority(
-            g, all_paths, hospital_id, time_budget
+            g, all_paths, hospital_id, time_budget, all_hospitals
         )
     
     # Monta percurso detalhado (hospital -> paciente -> hospital -> ...)
-    chosen_patients = route[1:] if len(route) > 1 else []
+    # A rota agora é uma lista de tuplas (tipo, nid)
+    chosen_patients = []
+    full_path = []
+    
+    for tipo, nid in route:
+        full_path.append(nid)
+        if tipo == 'P':  # Paciente
+            chosen_patients.append(nid)
     
     # Marca resgatados
     for pid in chosen_patients:
         if pid in g.nodes:
             g.nodes[pid].resgatado = True
-    
-    # Constrói percurso completo com ida e volta
-    full_path = [hospital_id]
-    for pid in chosen_patients:
-        full_path.append(pid)
-        full_path.append(hospital_id)
     
     return {
         'route': route,
