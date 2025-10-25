@@ -143,6 +143,108 @@ def load_dataset(dataset_path: str) -> Tuple[Graph, Dict, float, int]:
     
     return g, hospital_id, tempo_total
 
+def load_dataset_from_upload(pontos_file, ruas_file, dados_iniciais_file) -> Tuple[Graph, int, float]:
+    """
+    Carrega um dataset a partir de arquivos uploaded.
+    """
+    g = Graph()
+    
+    # Carrega nós do arquivo pontos
+    pontos_content = pontos_file.getvalue().decode('utf-8')
+    pontos_lines = pontos_content.strip().split('\n')
+    rdr = csv.DictReader(pontos_lines)
+    
+    for row in rdr:
+        nid = int(row.get('id') or row.get('Id') or row.get('ID'))
+        tipo = row.get('tipo', '')
+        nome = row.get('nome', '')
+        prioridade = int(row['prioridade']) if row.get('prioridade') else None
+        tempo = float(row['tempo_cuidados_minimos']) if row.get('tempo_cuidados_minimos') else None
+        
+        # Determina se é hospital
+        is_h_col = row.get('is_hospital', '')
+        is_h = False
+        try:
+            if isinstance(is_h_col, str) and is_h_col.strip() != '':
+                is_h = is_h_col.lower().strip() in ('1', 'true', 'sim', 'yes')
+        except Exception:
+            is_h = False
+        
+        if not is_h and isinstance(tipo, str) and tipo.strip().lower() == 'hospital':
+            is_h = True
+        
+        n = Node(
+            id=nid,
+            tipo=tipo,
+            nome=nome,
+            prioridade=prioridade,
+            tempo_cuidados_minimos=tempo,
+            is_hospital=is_h
+        )
+        g.add_node(n)
+    
+    # Carrega arestas do arquivo ruas
+    ruas_content = ruas_file.getvalue().decode('utf-8')
+    ruas_lines = ruas_content.strip().split('\n')
+    rdr = csv.DictReader(ruas_lines)
+    
+    for row in rdr:
+        a_raw = row.get('ponto_origem') or row.get('from') or row.get('a')
+        b_raw = row.get('ponto_destino') or row.get('to') or row.get('b')
+        w_raw = row.get('tempo_transporte') or row.get('weight') or row.get('peso')
+        
+        if a_raw is None or b_raw is None:
+            continue
+        
+        try:
+            a = int(a_raw)
+            b = int(b_raw)
+            w = float(w_raw) if w_raw not in (None, '') else 1.0
+        except ValueError:
+            continue
+        
+        g.add_edge(a, b, w, bidirectional=True)
+    
+    # Lê dados iniciais
+    dados_content = dados_iniciais_file.getvalue().decode('utf-8')
+    dados_lines = dados_content.strip().split('\n')
+    rdr = csv.DictReader(dados_lines)
+    
+    tempo_total = None
+    hospital_id = None
+    
+    for row in rdr:
+        # Lê tempo_total
+        if 'tempo_total' in row and row['tempo_total'] not in (None, ''):
+            try:
+                tempo_total = float(row['tempo_total'])
+            except:
+                pass
+        
+        # Lê ponto_inicial
+        try:
+            hospital_id = int(row.get('ponto_inicial') or list(row.values())[0])
+        except:
+            pass
+        
+        if tempo_total and hospital_id is not None:
+            break
+    
+    # Se não encontrou tempo_total, tenta segunda coluna
+    if tempo_total is None:
+        dados_lines = dados_content.strip().split('\n')
+        rdr = csv.DictReader(dados_lines)
+        for row in rdr:
+            vals = list(row.values())
+            if len(vals) >= 2 and vals[1] not in (None, ''):
+                try:
+                    tempo_total = float(vals[1])
+                    break
+                except:
+                    pass
+    
+    return g, hospital_id, tempo_total
+
 def get_dataset_stats(g: Graph) -> Dict:
     """Retorna estatísticas do dataset carregado."""
     hospitais = [n for n in g.nodes.values() if n.is_hospital]
@@ -490,23 +592,113 @@ def main():
     st.sidebar.title("🚑 Otimizador de Rotas")
     st.sidebar.markdown("---")
     
-    # Seleção de dataset
-    st.sidebar.subheader("📂 Seleção de Dataset")
-    selected_dataset = st.sidebar.selectbox(
-        "Escolha o dataset:",
-        options=list(DATASETS.keys()),
+    # Seleção de fonte de dados
+    st.sidebar.subheader("📂 Fonte de Dados")
+    data_source = st.sidebar.radio(
+        "Escolha a fonte:",
+        ["📊 Dataset Pré-configurado", "📤 Upload de Arquivos"],
         index=0
     )
     
-    dataset_path = DATASETS[selected_dataset]
+    g = None
+    default_hospital_id = None
+    default_time_budget = None
+    stats = None
     
-    # Carrega dataset
-    try:
-        with st.spinner(f"Carregando {selected_dataset}..."):
-            g, default_hospital_id, default_time_budget = load_dataset(dataset_path)
-            stats = get_dataset_stats(g)
-    except Exception as e:
-        st.error(f"❌ Erro ao carregar dataset: {e}")
+    if data_source == "📊 Dataset Pré-configurado":
+        # Seleção de dataset pré-configurado
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Selecione o Dataset")
+        selected_dataset = st.sidebar.selectbox(
+            "Dataset:",
+            options=list(DATASETS.keys()),
+            index=0
+        )
+        
+        dataset_path = DATASETS[selected_dataset]
+        
+        # Carrega dataset
+        try:
+            with st.spinner(f"Carregando {selected_dataset}..."):
+                g, default_hospital_id, default_time_budget = load_dataset(dataset_path)
+                stats = get_dataset_stats(g)
+        except Exception as e:
+            st.error(f"❌ Erro ao carregar dataset: {e}")
+            return
+    
+    else:  # Upload de Arquivos
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("📤 Upload de Arquivos CSV")
+        st.sidebar.info("Faça upload dos 3 arquivos necessários:")
+        
+        pontos_file = st.sidebar.file_uploader(
+            "1️⃣ pontos.csv",
+            type=['csv'],
+            key='pontos',
+            help="Arquivo com informações dos nós (hospitais e pacientes)"
+        )
+        
+        ruas_file = st.sidebar.file_uploader(
+            "2️⃣ ruas.csv",
+            type=['csv'],
+            key='ruas',
+            help="Arquivo com informações das conexões (arestas)"
+        )
+        
+        dados_iniciais_file = st.sidebar.file_uploader(
+            "3️⃣ dados_iniciais.csv",
+            type=['csv'],
+            key='dados_iniciais',
+            help="Arquivo com ponto inicial e tempo disponível"
+        )
+        
+        # Só processa se todos os arquivos foram uploaded
+        if pontos_file and ruas_file and dados_iniciais_file:
+            try:
+                with st.spinner("Processando arquivos..."):
+                    g, default_hospital_id, default_time_budget = load_dataset_from_upload(
+                        pontos_file, ruas_file, dados_iniciais_file
+                    )
+                    stats = get_dataset_stats(g)
+                st.sidebar.success("✅ Arquivos carregados com sucesso!")
+            except Exception as e:
+                st.sidebar.error(f"❌ Erro ao processar arquivos: {e}")
+                import traceback
+                st.sidebar.code(traceback.format_exc())
+                return
+        else:
+            st.sidebar.warning("⚠️ Aguardando upload dos 3 arquivos CSV...")
+            st.info("👈 Por favor, faça upload dos arquivos CSV na sidebar para começar.")
+            
+            # Mostra exemplo do formato esperado
+            st.markdown("### 📋 Formato dos Arquivos CSV")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("**pontos.csv**")
+                st.code("""id,tipo,nome,prioridade,tempo_cuidados_minimos
+0,hospital,Hospital Central,0,0
+1,paciente,Ana Silva,10,1
+2,paciente,Carlos Santos,20,1""", language="csv")
+            
+            with col2:
+                st.markdown("**ruas.csv**")
+                st.code("""ponto_origem,ponto_destino,tempo_transporte
+0,1,1.5
+0,2,2.0
+1,2,1.0""", language="csv")
+            
+            with col3:
+                st.markdown("**dados_iniciais.csv**")
+                st.code("""ponto_inicial,tempo_total
+0,10""", language="csv")
+            
+            return
+    
+    # Se chegou aqui, dataset foi carregado (pré-configurado ou upload)
+    if g is None or stats is None:
+        st.error("❌ Erro ao carregar dados")
         return
     
     # Preview do dataset
