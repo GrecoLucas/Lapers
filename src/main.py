@@ -79,8 +79,9 @@ def print_graph(graph: Graph):
             tipo = getattr(n, "tipo", "")
             nome = getattr(n, "nome", "")
             prioridade = getattr(n, "prioridade", None)
+            tempo = getattr(n, "tempo_cuidados_minimos", None)
             is_h = getattr(n, "is_hospital", None)
-            print(f"  {nid}: tipo={tipo} nome={nome} prioridade={prioridade} is_hospital={is_h}")
+            print(f"  {nid}: tipo={tipo} nome={nome} prioridade={prioridade} tempo={tempo} is_hospital={is_h}")
     except Exception as e:
         print("Não foi possível listar nós:", e)
 
