@@ -328,12 +328,13 @@ def calculate_optimal_route(g: Graph, hospital_id: int, time_budget: float, forc
             "**P²** = Iterações para selecionar próximo paciente de forma gulosa"
         )
     
-    dijkstra_complexity = f"O(V² × (V + E) log V)"
-    dijkstra_values = f"O({num_nodes}² × ({num_nodes} + {num_edges}) log {num_nodes})"
+    dijkstra_complexity = "O(V × E log V) (usando heap/priority queue)"
+    dijkstra_values = f"O({num_nodes} × {num_edges} log {num_nodes})"
     dijkstra_explanation = (
         "**V** = Número de vértices (nós)\n"
         "**E** = Número de arestas\n"
-        "Executa Dijkstra V vezes (uma para cada nó)"
+        "Dijkstra com heap (priority queue) tem custo O(E log V) por fonte; "
+        "rodando para cada vértice isso dá O(V × E log V).\n"
     )
     
     # Executa otimização
