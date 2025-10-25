@@ -14,12 +14,16 @@ from dp import (
     greedy_maximize_priority,
 )
 import csv
+from UI.interface import draw_graph
+
+DIFFICULTY = "mytests"
+LEVEL = "1"
 
 # Make dataset paths relative to repository root (two levels up from this file's folder)
 BASE_DIR = Path(__file__).resolve().parent.parent
-PATH_NODES = BASE_DIR / "datasets" / "easy" / "1" / "pontos.csv"
-PATH_EDGES = BASE_DIR / "datasets" / "easy" / "1" / "ruas.csv"
-PATH_INITIAL = BASE_DIR / "datasets" / "easy" / "1" / "dados_iniciais.csv"
+PATH_NODES = BASE_DIR / "datasets" / DIFFICULTY / LEVEL / "pontos.csv"
+PATH_EDGES = BASE_DIR / "datasets" / DIFFICULTY / LEVEL / "ruas.csv"
+PATH_INITIAL = BASE_DIR / "datasets" / DIFFICULTY / LEVEL / "dados_iniciais.csv"
 
 g = Graph()
 
@@ -73,7 +77,6 @@ def load_edges(path):
                 w = 1.0
 
             g.add_edge(a, b, w, bidirectional=True)
-
 
 def print_graph(graph: Graph):
     # print nodes
@@ -129,6 +132,11 @@ def main():
         if getattr(_n, 'tipo', '') == 'paciente':
             _n.resgatado = False
     print_graph(g)
+    # Desenha o grafo usando NetworkX/Matplotlib (UI)
+    #try:
+    #    draw_graph(g, show=True)
+    #except Exception as e:
+    #    print(f"Aviso: falha ao desenhar grafo na UI: {e}")
     
     # Calcula caminhos mais curtos entre todos os pares de nós
     print("\nCalculando caminhos mais curtos com Dijkstra...")
@@ -168,9 +176,9 @@ def main():
 
     for hid in hospital_ids:
         if use_dp:
-            route, prio, t, _ = maximize_priority_dp(g, all_paths, hid, time_budget)
+            route, prio, t, _ = maximize_priority_dp(g, all_paths, hid, time_budget, hospital_ids)
         else:
-            route, prio, t, _ = greedy_maximize_priority(g, all_paths, hid, time_budget)
+            route, prio, t, _ = greedy_maximize_priority(g, all_paths, hid, time_budget, hospital_ids)
         if prio > best['priority'] or (prio == best['priority'] and t < best['time']):
             best.update({'hospital': hid, 'route': route, 'priority': prio, 'time': t, 'optimal': use_dp})
 
@@ -178,7 +186,7 @@ def main():
         print("Nenhuma rota viável dentro do budget encontrada a partir de nenhum hospital.")
         return
 
-    # Impressão detalhada da rota (viagens redondas hospital ↔ paciente)
+    # Impressão detalhada da rota (agora com hospitais variáveis)
     print("\n" + "="*80)
     print("SOLUÇÃO ENCONTRADA")
     print("="*80)
@@ -186,46 +194,64 @@ def main():
     print(f"Hospital inicial: {hid} ({g.nodes[hid].nome})")
     print(f"Tipo de solução: {'ÓTIMA (DP)' if best['optimal'] else 'HEURÍSTICA'}")
 
-    # Lista de atendimentos escolhidos (após o hospital)
-    chosen_patients = best['route'][1:]
+    # A rota agora é uma lista de tuplas (tipo, nid)
+    route_nodes = best['route']
+    
+    # Extrai pacientes resgatados
+    chosen_patients = [nid for tipo, nid in route_nodes if tipo == 'P']
+    
     if not chosen_patients:
         print("Nenhum paciente selecionado dentro do budget.")
         print("="*80)
         return
 
-    # Constrói percurso com viagens de ida e volta ao hospital: hid -> p1 -> hid -> p2 -> hid ...
-    percurso = [hid]
-    for pid in chosen_patients:
-        percurso.append(pid)
-        percurso.append(hid)
-
-    print("Percurso: " + " → ".join(str(x) for x in percurso))
-
-    # Marca pacientes resgatados e calcula tempo de transporte e atendimento
+    # Monta percurso para exibição
+    percurso_display = []
+    for tipo, nid in route_nodes:
+        if tipo == 'H':
+            percurso_display.append(f"H{nid}")
+        else:
+            percurso_display.append(f"P{nid}")
+    
+    print("Percurso: " + " → ".join(percurso_display))
+    
+    # Calcula tempos detalhados
     total_transp = 0.0
     total_atend = 0.0
-    for pid in chosen_patients:
-        if pid in g.nodes:
-            g.nodes[pid].resgatado = True
-            # Tempo de ida (hospital -> paciente)
-            dist_hp = all_paths.get((hid, pid), (float('inf'), []))[0]
-            if dist_hp != float('inf'):
-                total_transp += dist_hp
-            # Tempo de atendimento
-            tempo = getattr(g.nodes[pid], 'tempo_cuidados_minimos', 0) or 0
+    
+    print("\nDetalhamento:")
+    for i in range(len(route_nodes) - 1):
+        tipo_curr, nid_curr = route_nodes[i]
+        tipo_next, nid_next = route_nodes[i + 1]
+        
+        # Distância entre localizações consecutivas
+        d = all_paths.get((nid_curr, nid_next), (float('inf'), []))[0]
+        if d != float('inf'):
+            total_transp += d
+        
+        # Se próximo é paciente, adiciona tempo de atendimento
+        if tipo_next == 'P':
+            node = g.nodes[nid_next]
+            g.nodes[nid_next].resgatado = True
+            tempo = getattr(node, 'tempo_cuidados_minimos', 0) or 0
             total_atend += float(tempo)
-            # Tempo de volta (paciente -> hospital)
-            dist_ph = all_paths.get((pid, hid), (float('inf'), []))[0]
-            if dist_ph != float('inf'):
-                total_transp += dist_ph
+            
+            prev_label = f"H{nid_curr}" if tipo_curr == 'H' else f"P{nid_curr}"
+            print(f"  {prev_label} → P{nid_next}: {d:.2f} (transporte) + {tempo:.2f} (atendimento)")
 
     print("-"*80)
     print(f"Prioridade total atendida: {best['priority']}")
     print(f"Tempo total transporte: {total_transp:.2f}")
     print(f"Tempo total atendimento: {total_atend:.2f}")
     print(f"Tempo total usado: {total_transp + total_atend:.2f} (budget={time_budget:.2f})")
-    # Resumo final dos pacientes resgatados (apenas IDs)
-    rescued_ids = [str(nid) for nid in chosen_patients if getattr(g.nodes[nid], 'resgatado', False)]
+    
+    # Hospital final
+    final_tipo, final_nid = route_nodes[-1]
+    if final_tipo == 'H':
+        print(f"Hospital final: {final_nid} ({g.nodes[final_nid].nome})")
+    
+    # Resumo final dos pacientes resgatados
+    rescued_ids = [str(nid) for nid in chosen_patients]
     print(f"Pacientes resgatados: {', '.join(rescued_ids) if rescued_ids else 'nenhum'}")
     print("="*80)
 
