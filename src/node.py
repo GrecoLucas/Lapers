@@ -9,6 +9,7 @@ class Node:
         prioridade: Optional[int] = None,
         tempo_cuidados_minimos: Optional[float] = None,
         is_hospital: bool = False,
+        resgatado: bool = False,
     ):
         self.id = id
         self.tipo = tipo
@@ -16,6 +17,7 @@ class Node:
         self.prioridade = prioridade
         self.tempo_cuidados_minimos = tempo_cuidados_minimos
         self.is_hospital = is_hospital
+        self.resgatado = resgatado
 
     def to_dict(self) -> dict:
         return {
@@ -25,7 +27,8 @@ class Node:
             "prioridade": self.prioridade,
             "tempo_cuidados_minimos": self.tempo_cuidados_minimos,
             "is_hospital": self.is_hospital,
+            "resgatado": getattr(self, "resgatado", False),
         }
 
     def __repr__(self) -> str:
-        return f"Node(id={self.id}, nome={self.nome!r}, tipo={self.tipo!r})"
+        return f"Node(id={self.id}, nome={self.nome!r}, tipo={self.tipo!r}, resgatado={getattr(self, 'resgatado', False)})"

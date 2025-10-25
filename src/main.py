@@ -8,6 +8,11 @@ from dijkstra import (
     print_shortest_paths,
     print_distance_matrix
 )
+from dp import (
+    read_time_budget,
+    maximize_priority_dp,
+    greedy_maximize_priority,
+)
 import csv
 
 # Make dataset paths relative to repository root (two levels up from this file's folder)
@@ -81,7 +86,8 @@ def print_graph(graph: Graph):
             prioridade = getattr(n, "prioridade", None)
             tempo = getattr(n, "tempo_cuidados_minimos", None)
             is_h = getattr(n, "is_hospital", None)
-            print(f"  {nid}: tipo={tipo} nome={nome} prioridade={prioridade} tempo={tempo} is_hospital={is_h}")
+            resgatado = getattr(n, "resgatado", False)
+            print(f"  {nid}: tipo={tipo} nome={nome} prioridade={prioridade} tempo={tempo} is_hospital={is_h} resgatado={resgatado}")
     except Exception as e:
         print("Não foi possível listar nós:", e)
 
@@ -118,46 +124,100 @@ def main():
     print("Carregando grafo do dataset...")
     load_nodes(PATH_NODES)
     load_edges(PATH_EDGES)
+    # opcional: zera estado de resgate no início da execução
+    for _nid, _n in g.nodes.items():
+        if getattr(_n, 'tipo', '') == 'paciente':
+            _n.resgatado = False
     print_graph(g)
     
     # Calcula caminhos mais curtos entre todos os pares de nós
     print("\nCalculando caminhos mais curtos com Dijkstra...")
     all_paths = all_pairs_shortest_paths(g)
-    
-    # Imprime os resultados
-    print_shortest_paths(g, all_paths)
-    print_distance_matrix(g, all_paths)
-    
-    # Exemplo: caminho específico do hospital (nó 0) para um paciente
+
+
+    # Lê budget de tempo
+    time_budget = read_time_budget(PATH_INITIAL)
+    if time_budget is None:
+        print("\n[AVISO] Nenhum tempo_total encontrado em dados_iniciais.csv; não será feita otimização por budget.\n")
+        return
+
+    print(f"\nTempo total disponível (budget): {time_budget:.2f}")
+
+    # Identifica hospitais e pacientes
+    hospital_ids = [nid for nid, n in g.nodes.items() if getattr(n, 'is_hospital', False)]
+    pacientes = [(nid, n) for nid, n in g.nodes.items() if getattr(n, 'tipo', '') == 'paciente' and (n.prioridade or 0) > 0]
+    num_pacientes = len(pacientes)
+    print(f"Hospitais encontrados: {len(hospital_ids)} | Pacientes candidatos: {num_pacientes}")
+
+    if not hospital_ids:
+        print("Nenhum hospital encontrado no grafo; abortando.")
+        return
+
+    # Escolhe método conforme número de pacientes
+    use_dp = num_pacientes <= 20
+    metodo = 'DP (ótimo)' if use_dp else 'Heurística (gananciosa)'
+    print(f"Método de otimização: {metodo}")
+
+    best = {
+        'hospital': None,
+        'route': [],
+        'priority': 0,
+        'time': float('inf'),
+        'optimal': use_dp,
+    }
+
+    for hid in hospital_ids:
+        if use_dp:
+            route, prio, t, _ = maximize_priority_dp(g, all_paths, hid, time_budget)
+        else:
+            route, prio, t, _ = greedy_maximize_priority(g, all_paths, hid, time_budget)
+        if prio > best['priority'] or (prio == best['priority'] and t < best['time']):
+            best.update({'hospital': hid, 'route': route, 'priority': prio, 'time': t, 'optimal': use_dp})
+
+    if not best['route'] or best['hospital'] is None or best['priority'] == 0:
+        print("Nenhuma rota viável dentro do budget encontrada a partir de nenhum hospital.")
+        return
+
+    # Impressão detalhada da rota (viagens redondas hospital ↔ paciente)
     print("\n" + "="*80)
-    print("EXEMPLO: Caminho do Hospital para cada Paciente")
+    print("SOLUÇÃO ENCONTRADA")
     print("="*80)
-    
-    hospital_id = None
-    # Encontra o hospital
-    for node_id, node in g.nodes.items():
-        if node.is_hospital:
-            hospital_id = node_id
-            break
-    
-    if hospital_id is not None:
-        # Lista pacientes ordenados por prioridade
-        pacientes = [(nid, n) for nid, n in g.nodes.items() if n.tipo == 'paciente']
-        pacientes_ordenados = sorted(pacientes, key=lambda x: x[1].prioridade or 0, reverse=True)
-        
-        print(f"\nHospital: {g.nodes[hospital_id].nome} (ID: {hospital_id})\n")
-        
-        for paciente_id, paciente in pacientes_ordenados:
-            distance, path = all_paths[(hospital_id, paciente_id)]
-            
-            # Formata o caminho
-            path_str = " → ".join([f"{nid}({g.nodes[nid].nome})" for nid in path])
-            
-            print(f"Paciente: {paciente.nome} (ID: {paciente_id}, Prioridade: {paciente.prioridade})")
-            print(f"  Tempo de transporte: {distance:.2f}")
-            print(f"  Caminho: {path_str}")
-            print()
-    
+    hid = best['hospital']
+    print(f"Hospital inicial: {hid} ({g.nodes[hid].nome})")
+    print(f"Tipo de solução: {'ÓTIMA (DP)' if best['optimal'] else 'HEURÍSTICA'}")
+
+    # Lista de atendimentos escolhidos (após o hospital)
+    chosen_patients = best['route'][1:]
+    if not chosen_patients:
+        print("Nenhum paciente selecionado dentro do budget.")
+        print("="*80)
+        return
+
+    # Constrói percurso com viagens de ida e volta ao hospital: hid -> p1 -> hid -> p2 -> hid ...
+    percurso = [hid]
+    for pid in chosen_patients:
+        percurso.append(pid)
+        percurso.append(hid)
+
+    print("Percurso: " + " → ".join(str(x) for x in percurso))
+
+    # Marca pacientes resgatados e calcula tempo de atendimento (se disponível)
+    total_transp = 0.0
+    total_atend = 0.0
+    for pid in chosen_patients:
+        if pid in g.nodes:
+            g.nodes[pid].resgatado = True
+            tempo = getattr(g.nodes[pid], 'tempo_cuidados_minimos', 0) or 0
+            total_atend += float(tempo)
+
+    print("-"*80)
+    print(f"Prioridade total atendida: {best['priority']}")
+    print(f"Tempo total transporte: {total_transp:.2f}")
+    print(f"Tempo total atendimento: {total_atend:.2f}")
+    print(f"Tempo total usado: {total_transp + total_atend:.2f} (budget={time_budget:.2f})")
+    # Resumo final dos pacientes resgatados (apenas IDs)
+    rescued_ids = [str(nid) for nid in chosen_patients if getattr(g.nodes[nid], 'resgatado', False)]
+    print(f"Pacientes resgatados: {', '.join(rescued_ids) if rescued_ids else 'nenhum'}")
     print("="*80)
 
 if __name__ == "__main__":
