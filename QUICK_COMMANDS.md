@@ -222,9 +222,10 @@ streamlit run src/app.py
 4. Explicar métricas (30s)
 5. Mostrar grafo (30s)
 6. Mostrar tabela detalhada (30s)
-7. [Opcional] Mudar para Hard 10
-8. [Opcional] Override de parâmetros
-9. [Opcional] Exportar CSV
+7.Mostrar Funcionalidade Upload
+8. [Opcional] Mudar para Hard 10
+9. [Opcional] Override de parâmetros
+10. [Opcional] Exportar CSV
 ```
 
 ### Pontos de Destaque
