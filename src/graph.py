@@ -1,7 +1,7 @@
 from pathlib import Path
 import csv
 from typing import Dict, List, Tuple, Optional
-from .node import Node
+from node import Node
 
 class Graph:
     def __init__(self):
