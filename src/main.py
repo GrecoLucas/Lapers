@@ -201,14 +201,23 @@ def main():
 
     print("Percurso: " + " → ".join(str(x) for x in percurso))
 
-    # Marca pacientes resgatados e calcula tempo de atendimento (se disponível)
+    # Marca pacientes resgatados e calcula tempo de transporte e atendimento
     total_transp = 0.0
     total_atend = 0.0
     for pid in chosen_patients:
         if pid in g.nodes:
             g.nodes[pid].resgatado = True
+            # Tempo de ida (hospital -> paciente)
+            dist_hp = all_paths.get((hid, pid), (float('inf'), []))[0]
+            if dist_hp != float('inf'):
+                total_transp += dist_hp
+            # Tempo de atendimento
             tempo = getattr(g.nodes[pid], 'tempo_cuidados_minimos', 0) or 0
             total_atend += float(tempo)
+            # Tempo de volta (paciente -> hospital)
+            dist_ph = all_paths.get((pid, hid), (float('inf'), []))[0]
+            if dist_ph != float('inf'):
+                total_transp += dist_ph
 
     print("-"*80)
     print(f"Prioridade total atendida: {best['priority']}")
