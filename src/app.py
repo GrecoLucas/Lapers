@@ -283,7 +283,7 @@ def create_graph_visualization(g: Graph, result: Dict, hospital_id: int):
     for nid in G.nodes():
         node = g.nodes[nid]
         if node.is_hospital:
-            node_colors.append('red')
+            node_colors.append('white')
             node_sizes.append(1200)
         else:
             # Cor por prioridade (gradiente verde -> amarelo -> vermelho)
@@ -336,7 +336,7 @@ def create_graph_visualization(g: Graph, result: Dict, hospital_id: int):
     
     # Legenda
     legend_elements = [
-        mpatches.Patch(color='red', label='Hospital'),
+        mpatches.Patch(facecolor='white', edgecolor='black', label='Hospital'),
         mpatches.Patch(color='green', label='Paciente (Prioridade ≤10)'),
         mpatches.Patch(color='yellow', label='Paciente (Prioridade 11-20)'),
         mpatches.Patch(color='orange', label='Paciente (Prioridade 21-30)'),
